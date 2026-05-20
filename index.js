@@ -218,8 +218,8 @@ RULES:
 - NEVER delegate multiple tasks at once. ONE sub-task per response.
 - Code Agent is STATELESS — every instruction must be self-sufficient.
 - If Code Agent result is incomplete, delegate the next sub-task.
-- History is auto-summarized at ${HISTORY_TOKEN_LIMIT} tokens (Puru).
-- Global system token budget: ${GLOBAL_TOKEN_LIMIT} tokens.
+- History is auto-compacted at ${HISTORY_TOKEN_LIMIT} tokens (Puru).
+- Global system token budget: 10000 tokens.
 - Avoid nested asterisks or complex Markdown in <message>. Use '-' for lists.`;
 
 const CODE_SYSTEM_PROMPT = `You are Code, a specialist Code Sub-Agent under the Puru Orchestrator system.

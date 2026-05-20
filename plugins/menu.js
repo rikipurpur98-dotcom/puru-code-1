@@ -52,8 +52,8 @@ module.exports = (bot) => {
             `📅 *Created:* \`${ws.createdAt}\`\n` +
             `💬 *Total Messages:* ${ws.messageCount}\n` +
             `📦 *History:* ${ws.history.length} pesan\n` +
-            `🧠 *Puru Tokens:* \`${totalTokens}\` / \`${HISTORY_TOKEN_LIMIT}\` (5k limit)\n` +
-            `🌐 *Global Limit:* \`${GLOBAL_TOKEN_LIMIT}\` token\n` +
+            `🧠 *Puru Tokens:* \`${totalTokens}\` / \`${HISTORY_TOKEN_LIMIT}\` (3k limit)\n` +
+            `🌐 *Global Limit:* \`10000\` token\n` +
             `🔧 *Code Agent:* Stateless (Shared E2B sandbox)\n` +
             `🧪 *E2B Sandbox:* ${sandboxActive ? '✅ Aktif (Shared)' : '⏸️ Tidak aktif'}\n` +
             `☁️ *Storage:* Firebase RTDB (Shared Files, Personal History)` +
@@ -124,7 +124,7 @@ module.exports = (bot) => {
             `/reset            — Reset history & persona (file shared tetap ada)\n` +
             `/help             — Bantuan ini\n\n` +
             `*Storage & Sandbox:*\n` +
-            `• Puru history: max 5.000 token (personal, auto-compact)\n` +
+            `• Puru history: max 3.000 token (personal, auto-compact)\n` +
             `• Code Agent: stateless, shared filesystem antar user\n` +
             `• E2B sandbox: keep-alive 5 menit (shared)\n` +
             `• Workspace files: tersimpan di Firebase (shared), di-inject ke sandbox baru\n` +
