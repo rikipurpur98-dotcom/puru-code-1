@@ -1,0 +1,8 @@
+{
+  "development": {
+    "BOT_TOKEN": "8476842956:AAFjjdW7zLeAdu_vKd726XUkg-YvgFeI0Jc"
+  },
+  "production": {
+    "BOT_TOKEN": "8780968685:AAGGWgQKGcmegNFpq28JHyLRLL0vwbbk3-M"
+  }
+}
