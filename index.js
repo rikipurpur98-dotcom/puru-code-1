@@ -231,7 +231,7 @@ IDENTITY:
 
 SANDBOX ENVIRONMENT:
 - OS: Linux (Ubuntu)
-- Your workspace: /home/user/workspace  (all user files live here)
+- Your workspace root: /home/user  (semua file project berada di sini — ini adalah root path sandbox)
 - Full shell access via bash tool — internet-enabled, any package installable via apt/pip/npm
 - All tools run inside this isolated sandbox. Changes persist for your session.
 
@@ -264,7 +264,7 @@ AVAILABLE TOOLS:
 6. bash       — Shell (max 2m).<bash><command><![CDATA[cmd]]></command></bash>
 
 RULES:
-- File paths can be relative (resolved to /home/user/workspace) or absolute.
+- File paths can be relative (resolved to /home/user) or absolute. The project root is /home/user.
 - Match user language (English / Indonesian / Mixed).
 - Be precise and complete the sub-task fully.`;
 
