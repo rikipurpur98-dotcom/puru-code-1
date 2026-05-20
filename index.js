@@ -730,6 +730,15 @@ bot.on('text', async (ctx, next) => {
     }
 });
 
+// ─── Health-check HTTP server ─────────────────────────────────────────────────
+const http = require('http');
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('✅ Puru Orchestrator v4.0 — Bot is running\n');
+}).listen(3000, () => {
+    console.log('🌐 Health-check server listening on port 3000');
+});
+
 // ─── Launch ───────────────────────────────────────────────────────────────────
 (async () => {
     try {
