@@ -35,11 +35,12 @@ bot.catch((err, ctx) => {
 });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const AI_API_URL     = 'https://puruboy-api.vercel.app/api/ai/gemini-v2';
-const MAX_PURU_LOOPS = 10;
-const MAX_CODE_LOOPS = 10;
-const RETRY_COUNT    = 3;
-const RETRY_DELAY_MS = 3000;
+const AI_API_URL          = 'https://puruboy-api.vercel.app/api/ai/gemini-v2';
+const FALLBACK_AI_API_URL = 'https://puruboy-api.vercel.app/api/ai/gemini';
+const MAX_PURU_LOOPS      = 10;
+const MAX_CODE_LOOPS      = 10;
+const MAX_TOTAL_RETRIES   = 5;
+const RETRY_DELAY_MS      = 3000;
 
 // ─── Pending Continue state ───────────────────────────────────────────────────
 const pendingLoops = new Map();
@@ -296,47 +297,100 @@ async function buildConversation(userId) {
     return `System: ${systemPrompt}\n\n${historyText}`;
 }
 
-// ─── API call with retry ──────────────────────────────────────────────────────
+// ─── Extract AI Text from various response formats ───────────────────────────
+function extractAIText(data) {
+    if (!data) return '';
+
+    // 1. Handle JSON Object (Primary API format)
+    if (typeof data === 'object') {
+        if (data.result?.answer) return String(data.result.answer);
+        if (data.answer)         return String(data.answer);
+        if (data.text)           return String(data.text);
+    }
+
+    // 2. Handle SSE String (Fallback API format)
+    if (typeof data === 'string' && data.includes('data:')) {
+        try {
+            const lines = data.split('\n');
+            let fullText = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data:')) {
+                    try {
+                        const jsonStr = trimmed.replace(/^data:\s*/, '').trim();
+                        if (jsonStr === '[DONE]') continue;
+                        
+                        const parsed = JSON.parse(jsonStr);
+                        if (parsed.text) fullText += parsed.text;
+                    } catch (_) { /* Skip invalid JSON segments */ }
+                }
+            }
+            if (fullText.trim()) return fullText.trim();
+            
+            // If we got "data:" lines but no text, maybe it's a different JSON structure
+            console.warn('[extractAIText] SSE found but no text extracted. Raw sample:', data.slice(0, 100));
+        } catch (e) {
+            console.error('[extractAIText] SSE parse error:', e.message);
+        }
+    }
+
+    // 3. Fallback: If it's a non-empty string that doesn't look like SSE, return it
+    if (typeof data === 'string' && data.trim().length > 0) return data.trim();
+
+    // 4. Last resort
+    return typeof data === 'object' ? JSON.stringify(data) : String(data);
+}
+
+// ─── API call with alternating retry ─────────────────────────────────────────
 async function callAIWithRetry(ctx, statusMsgId, payload) {
     let lastError;
-    for (let attempt = 1; attempt <= RETRY_COUNT; attempt++) {
+    
+    for (let attempt = 1; attempt <= MAX_TOTAL_RETRIES; attempt++) {
+        // Alternate: odd attempts use Primary, even attempts use Fallback
+        const isPrimary = (attempt % 2 !== 0);
+        const currentUrl = isPrimary ? AI_API_URL : FALLBACK_AI_API_URL;
+        const apiName = isPrimary ? 'Gemini-V2 (Primary)' : 'Gemini (Fallback)';
+        
         try {
-            return await axios({
+            console.log(`[API] Attempt ${attempt}/${MAX_TOTAL_RETRIES} using ${apiName}...`);
+            
+            // Both APIs now use { prompt }
+            const currentPayload = { prompt: payload.prompt };
+
+            const response = await axios({
                 method:  'post',
-                url:     AI_API_URL,
-                data:    payload,
+                url:     currentUrl,
+                data:    currentPayload,
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 60_000,
             });
+
+            return response;
         } catch (err) {
             lastError = err;
-            const errDesc =
-                err.response?.data?.message ||
-                err.response?.data?.error   ||
-                err.code                    ||
-                err.message                 ||
-                'Unknown error';
+            const errDesc = err.response?.data?.message || err.response?.data?.error || err.code || err.message || 'Unknown error';
+            console.warn(`[API] ${apiName} failed (Attempt ${attempt}): ${errDesc}`);
 
-            console.warn(`[API] Attempt ${attempt}/${RETRY_COUNT} failed: ${errDesc}`);
-
-            if (attempt < RETRY_COUNT) {
-                const retryText =
-                    `⚠️ *API Error (percobaan ${attempt}/${RETRY_COUNT}):*\n` +
-                    `\`${errDesc}\`\n\n🔄 Mencoba ulang dalam 3 detik...`;
-                try {
-                    if (statusMsgId) {
+            if (attempt < MAX_TOTAL_RETRIES) {
+                const nextApi = (attempt % 2 === 0) ? 'Gemini-V2 (Primary)' : 'Gemini (Fallback)';
+                const retryText = 
+                    `⚠️ *API Error (${apiName}):*\n` +
+                    `\`${errDesc}\`\n\n` +
+                    `🔄 Percobaan ${attempt}/${MAX_TOTAL_RETRIES} gagal. Mencoba ${nextApi} dalam 3 detik...`;
+                
+                if (statusMsgId) {
+                    try {
                         await ctx.telegram.editMessageText(
                             ctx.chat.id, statusMsgId, null,
                             retryText, { parse_mode: 'Markdown' }
                         );
-                    } else {
-                        await ctx.reply(retryText, { parse_mode: 'Markdown' });
-                    }
-                } catch (_) {}
+                    } catch (_) {}
+                }
                 await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
             }
         }
     }
+    
     throw lastError;
 }
 
@@ -358,8 +412,7 @@ async function callCodeAgent(ctx, userId, subTask) {
             const response = await callAIWithRetry(ctx, null,
                 { prompt: conversation + '\nAssistant:' }
             );
-            rawText = response.data?.result?.answer || response.data?.answer || '';
-            if (typeof rawText !== 'string') rawText = JSON.stringify(rawText);
+            rawText = extractAIText(response.data);
         } catch (err) {
             clearInterval(typingHB);
             for (const id of interimMsgIds) {
@@ -456,8 +509,7 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
                 puruIteration === 0 ? statusMsgId : null,
                 { prompt: puruConversation + '\nAssistant:' }
             );
-            rawText = response.data?.result?.answer || response.data?.answer || '';
-            if (typeof rawText !== 'string') rawText = JSON.stringify(rawText);
+            rawText = extractAIText(response.data);
         } catch (err) {
             clearInterval(typingHB);
             const errDesc =
