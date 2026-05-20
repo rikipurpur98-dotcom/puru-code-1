@@ -11,7 +11,7 @@ Foundational context and operational instructions for Gemini CLI in this workspa
 - **Telegraf:** The Telegram Bot API framework for Node.js.
 - **Shared E2B Sandbox:** Secure, cloud-hosted Linux Ubuntu sandbox where all users operate concurrently.
 - **Firebase Realtime Database:** Used for persistent storage of user history, personas, and a shared workspace filesystem.
-- **gpt-tokenizer:** Used for history compaction and token management.
+- **gpt-tokenizer:** Used for history compaction (3k limit) and token management.
 
 ## Environment & Configuration
 Tokens and environment settings are managed through `config.json`. **Do NOT use .env files.**
@@ -30,6 +30,7 @@ The project uses standard `npm` scripts for execution.
 - **Start Production:** `npm start` (Sets `NODE_ENV=production`)
 - **Start Development:** `npm run dev` (Sets `NODE_ENV=development`)
 - **Install Dependencies:** `npm install`
+- **Share Project:** `npm run share` (Creates a temporary ZIP and download server)
 
 ## Core Logic & Workflows
 
@@ -43,10 +44,14 @@ The prefix is automatically stripped before the message is sent to the Orchestra
 ### Orchestration Loop
 1. **User Message:** Received via Telegram.
 2. **Puru Planning:** Puru generates an XML response containing a `<delegate>` task.
-3. **Code Execution:** The task is sent to the Code Agent, which executes tools in the shared E2B sandbox.
-4. **Tool Result:** Fed back to Puru.
-5. **Iteration:** The loop continues (up to 10 times) until Puru provides a final `<response>`.
-6. **State Persistence:** After each loop, shared workspace files are synced to Firebase if changes are detected.
+3. **API Call with Alternating Retry:** 
+   - Attempt 1: Gemini-V2 (Primary)
+   - Attempt 2: Gemini (Fallback)
+   - Continues alternating up to 5 total attempts.
+4. **Code Execution:** The task is sent to the Code Agent, which executes tools in the shared E2B sandbox.
+5. **Tool Result:** Fed back to Puru.
+6. **Iteration:** The loop continues (up to 10 times) until Puru provides a final `<response>`.
+7. **State Persistence:** After each loop, shared workspace files are synced to Firebase if changes are detected.
 
 ### Sandbox & Workspace Lifecycle
 - **Shared Environment:** All users share the same E2B sandbox instance and filesystem.
@@ -57,6 +62,9 @@ The prefix is automatically stripped before the message is sent to the Orchestra
 - **Removal Policy:** Sandboxes are totally killed (not paused) after 5 minutes of inactivity.
 
 ## Development Conventions
+- **Token Management:** Token counting using `gpt-tokenizer`, auto-compacting at 3,000 tokens. Logic in `lib/workspace.js`.
+- **API Resilience:** Dual-API fallback system (Gemini-V2 Primary / Gemini Fallback) with alternating retries.
+- **Response Handling:** Robust parsing for both standard JSON and SSE (streaming) responses in `index.js`.
 - **Tool Logic:** Core agent tools (ls, read_file, etc.) are located in `lib/tools.js`.
 - **Sandbox Management:** Shared E2B lifecycle, versioning, and sync logic are in `lib/sandbox.js`.
 - **Workspace State:** User-specific history and token management are in `lib/workspace.js`.
@@ -64,11 +72,12 @@ The prefix is automatically stripped before the message is sent to the Orchestra
 - **Response Format:** Both agents communicate using specific XML structures (`<response>`, `<message>`, `<delegate>`, `<tool>`).
 
 ## Key Files
-- `index.js`: Main entry point, startup cleanup, and bot initialization.
+- `index.js`: Main entry point, alternating API retry/fallback logic, and bot initialization.
 - `package.json`: Project dependencies and scripts.
 - `config.json`: Environment-specific API tokens.
 - `lib/firebase.js`: Firebase RTDB integration (Personal history: `users/{id}`, Shared files: `users/shared_workspace`).
 - `lib/sandbox.js`: Shared E2B Sandbox management (versioning, cleanup, sync).
 - `lib/tools.js`: Tool definitions for the Code Agent.
-- `lib/workspace.js`: Personal token counting and history management.
+- `lib/workspace.js`: Personal token counting and history management (3k limit).
 - `plugins/menu.js`: Implementation of `/menu`, `/info`, `/reset` (personal), and `/help`.
+- `share.js`: Utility for project archival and sharing.
