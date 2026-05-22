@@ -50,7 +50,7 @@ The prefix is automatically stripped before the message is sent to the Orchestra
    - Continues alternating up to 5 total attempts.
 4. **Code Execution:** The task is sent to the Code Agent, which executes tools in the shared E2B sandbox.
 5. **Tool Result:** Fed back to Puru.
-6. **Iteration:** The loop continues (up to 10 times) until Puru provides a final `<response>`.
+6. **Iteration:** The loop continues (up to 100 times) until Puru provides a final `<response>`.
 7. **State Persistence:** After each loop, shared workspace files are synced to Firebase if changes are detected.
 
 ### Sandbox & Workspace Lifecycle

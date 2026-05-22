@@ -34,11 +34,27 @@ bot.catch((err, ctx) => {
     console.error(`[Error] ${ctx.updateType}:`, err.message);
 });
 
+// ─── Global Reply Middleware ──────────────────────────────────────────────────
+// Automatically makes all bot responses reply to the user's original message
+bot.use(async (ctx, next) => {
+    const msgId = ctx.message?.message_id;
+    if (msgId) {
+        const wrap = (method) => {
+            const original = ctx[method];
+            ctx[method] = (text, extra) => {
+                return original.call(ctx, text, { reply_to_message_id: msgId, ...extra });
+            };
+        };
+        ['reply', 'replyWithMarkdown', 'replyWithDocument', 'replyWithPhoto'].forEach(wrap);
+    }
+    return next();
+});
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const AI_API_URL          = 'https://puruboy-api.vercel.app/api/ai/gemini-v2';
 const FALLBACK_AI_API_URL = 'https://puruboy-api.vercel.app/api/ai/gemini';
-const MAX_PURU_LOOPS      = 10;
-const MAX_CODE_LOOPS      = 10;
+const MAX_PURU_LOOPS      = 100;
+const MAX_CODE_LOOPS      = 100;
 const MAX_TOTAL_RETRIES   = 5;
 const RETRY_DELAY_MS      = 3000;
 
@@ -181,15 +197,17 @@ const PURU_BASE_SYSTEM_PROMPT = `You are Puru, an AI Orchestrator and the SINGLE
 You coordinate tasks by delegating to a specialist Code Sub-Agent named "Code".
 
 PERSONA & STYLE:
-- Mirror the user's language style. Informal if they're informal, formal if formal.
-- Jaksel style (mixed Indonesian-English) is fine if user uses it.
-- Friendly, smart, relaxed but competent.
+- Be friendly, smart, relaxed but competent. 🌟
+- Use "aku" for yourself and "kamu" for the user.
+- Keep responses CONCISE, short, and easy to read. Avoid long-winded explanations.
+- Use emojis naturally to make the conversation lively and friendly. 😊
+- Mirror the user's language style (mixed Indonesian-English/Jaksel is fine).
 
 YOUR ROLE:
 - Receive user requests and break them into small, sequential sub-tasks.
-- Delegate ONE sub-task at a time to Code Agent. Never batch multiple tasks at once.
-- Receive Code Agent's result and decide: done, give final answer; or continue, next sub-task.
-- Package all results into a clear, friendly final answer for the user.
+- Delegate ONE sub-task at a time to Code Agent.
+- Provide clear, brief status updates while working.
+- Package results into a friendly, SHORT, and beautiful final answer using "aku" and "kamu". 🚀
 
 RESPONSE FORMAT (XML):
 
@@ -220,7 +238,9 @@ RULES:
 - Code Agent is STATELESS — every instruction must be self-sufficient.
 - If Code Agent result is incomplete, delegate the next sub-task.
 - History is auto-compacted at ${HISTORY_TOKEN_LIMIT} tokens (Puru).
-- Global system token budget: 10000 tokens.
+- Global system token budget: ${GLOBAL_TOKEN_LIMIT} tokens.
+- STRICT ADHERENCE: Only perform changes explicitly requested by the user. Do NOT modify files or code that is not relevant to the current task.
+- ALWAYS check the "[SYSTEM REMINDER]" at the end of the prompt for your current goal.
 - Avoid nested asterisks or complex Markdown in <message>. Use '-' for lists.`;
 
 const CODE_SYSTEM_PROMPT = `You are Code, a specialist Code Sub-Agent under the Puru Orchestrator system.
@@ -493,6 +513,11 @@ async function callCodeAgent(ctx, userId, subTask) {
 // PURU ORCHESTRATION LOOP
 // ═══════════════════════════════════════════════════════════════════════════════
 async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = null) {
+    const ws = await ensureLoaded(userId);
+    // Capture the initial user request that triggered this orchestration
+    const initialUserRequest = loopState?.initialRequest || 
+        ([...ws.history].reverse().find(m => m.role === 'user')?.content || 'None');
+
     let puruConversation = loopState?.conversation || await buildConversation(userId);
     let puruIteration    = loopState?.iteration    || 0;
     const interimMsgIds  = [];
@@ -504,10 +529,15 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
 
         let rawText = '';
         try {
+            // Add a dynamic reminder to keep the AI focused on the goal
+            const prompt = puruConversation + 
+                `\n\n[SYSTEM REMINDER]\n- CURRENT GOAL: "${initialUserRequest}"\n- Stay focused on this goal. Do NOT make unrequested changes.\n- If the goal is met, provide the final answer.` +
+                '\nAssistant:';
+
             const response = await callAIWithRetry(
                 ctx,
                 puruIteration === 0 ? statusMsgId : null,
-                { prompt: puruConversation + '\nAssistant:' }
+                { prompt }
             );
             rawText = extractAIText(response.data);
         } catch (err) {
@@ -592,10 +622,14 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
         );
 
         // Feed result back into Puru's active conversation
+        const truncatedCodeResult = String(codeResult).length > 2000 
+            ? String(codeResult).slice(0, 2000) + '... (truncated for context)' 
+            : String(codeResult);
+
         puruConversation +=
             `\nAssistant: <response><message>${message}</message>` +
             `<delegate><task>${delegate.task}</task></delegate></response>` +
-            `\nCode Agent Result: ${codeResult}`;
+            `\nCode Agent Result: ${truncatedCodeResult}`;
 
         puruIteration++;
     }
@@ -605,7 +639,7 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
 
     return {
         type:         'error',
-        text:         '⚠️ *Puru gagal menyelesaikan tugas.* Terlalu banyak loop (10 delegasi). Coba pecah permintaan kamu jadi lebih sederhana.',
+        text:         '⚠️ *Puru gagal menyelesaikan tugas.* Terlalu banyak loop (100 delegasi). Coba pecah permintaan kamu jadi lebih sederhana.',
         interimMsgIds,
     };
 }
@@ -628,17 +662,6 @@ async function handleAgentResult(ctx, userId, result, statusMsgId) {
     }
 }
 
-// ─── /stop ──────────────────────────────────────────────────────────────────
-bot.command('stop', async (ctx) => {
-    const userId = ctx.from.id;
-    const ws = getWorkspace(userId);
-    if (ws.processing) {
-        ws.processing = false; // Stop the orchestration loop
-        await ctx.reply('🛑 Proses AI telah dihentikan.');
-    } else {
-        await ctx.reply('ℹ️ Tidak ada proses AI yang sedang berjalan.');
-    }
-});
 // ─── /start ───────────────────────────────────────────────────────────────────
 bot.start(async (ctx) => {
     await ctx.reply(
@@ -675,32 +698,36 @@ bot.on('document', async (ctx) => {
     const relPath      = `uploads/${fileName}`;
 
     ws.processing = true;
-    let statusMsg;
-    try {
-        await ctx.sendChatAction('upload_document');
+    
+    // Run document processing in the background (asynchronous)
+    (async () => {
+        let statusMsg;
+        try {
+            await ctx.sendChatAction('upload_document');
 
-        // Download file from Telegram as Buffer
-        const link     = await ctx.telegram.getFileLink(document.file_id);
-        const fileResp = await axios({ method: 'get', url: link.href, responseType: 'arraybuffer' });
-        const buffer   = Buffer.from(fileResp.data);
+            // Download file from Telegram as Buffer
+            const link     = await ctx.telegram.getFileLink(document.file_id);
+            const fileResp = await axios({ method: 'get', url: link.href, responseType: 'arraybuffer' });
+            const buffer   = Buffer.from(fileResp.data);
 
-        // Save to Firebase + inject into sandbox (if running)
-        await writeFileDirect(userId, relPath, buffer);
+            // Save to Firebase + inject into sandbox (if running)
+            await writeFileDirect(userId, relPath, buffer);
 
-        statusMsg = await ctx.reply('📎 File diupload! Puru sedang menganalisis... ⏳');
-        await pushMessage(userId, 'user',
-            `[User mengupload file: ${relPath}]${caption ? ' ' + caption : ''}`
-        );
+            statusMsg = await ctx.reply('📎 File diupload! Puru sedang menganalisis... ⏳');
+            await pushMessage(userId, 'user',
+                `[User mengupload file: ${relPath}]${caption ? ' ' + caption : ''}`
+            );
 
-        const result = await processPuruOrchestration(ctx, userId, statusMsg.message_id);
-        await handleAgentResult(ctx, userId, result, statusMsg.message_id);
+            const result = await processPuruOrchestration(ctx, userId, statusMsg.message_id);
+            await handleAgentResult(ctx, userId, result, statusMsg.message_id);
 
-    } catch (e) {
-        console.error('[Doc Error]', e);
-        try { await ctx.reply('❌ Gagal upload file: ' + e.message); } catch (_) {}
-    } finally {
-        ws.processing = false;
-    }
+        } catch (e) {
+            console.error('[Doc Error]', e);
+            try { await ctx.reply('❌ Gagal upload file: ' + e.message); } catch (_) {}
+        } finally {
+            ws.processing = false;
+        }
+    })();
 });
 
 // ─── Load Plugins ─────────────────────────────────────────────────────────────
@@ -746,8 +773,13 @@ bot.on('text', async (ctx, next) => {
         return;
     }
     const ws = getWorkspace(userId);
-    if (ws.processing)
-        return ctx.reply('⏳ Tunggu respons sebelumnya selesai dulu ya!');
+    
+    // Only block if it's an actual AI task request (Puru orchestration)
+    // Non-task messages (like just 'hello' in group without prefix) are ignored anyway.
+    // Commands are handled by other middlewares.
+    if (ws.processing) {
+        return ctx.reply('⏳ Tunggu respons sebelumnya selesai dulu ya! Atau ketik /stop untuk menghentikan paksa.');
+    }
 
     // "continue" resumes a pending orchestration loop
     if (userMessage.trim().toLowerCase() === 'continue') {
@@ -755,31 +787,45 @@ bot.on('text', async (ctx, next) => {
         if (state) {
             pendingLoops.delete(userId);
             ws.processing = true;
-            let statusMsg;
-            try {
-                statusMsg = await ctx.reply('🔄 Melanjutkan orchestration... ⏳');
-                const result = await processPuruOrchestration(
-                    ctx, userId, statusMsg.message_id, state
-                );
-                await handleAgentResult(ctx, userId, result, statusMsg.message_id);
-            } finally {
-                ws.processing = false;
-            }
+            
+            // Run orchestration in the background (asynchronous)
+            (async () => {
+                let statusMsg;
+                try {
+                    statusMsg = await ctx.reply('🔄 Melanjutkan orchestration... ⏳');
+                    const result = await processPuruOrchestration(
+                        ctx, userId, statusMsg.message_id, state
+                    );
+                    await handleAgentResult(ctx, userId, result, statusMsg.message_id);
+                } catch (err) {
+                    console.error('[Orchestration] Background continue error:', err);
+                    try { await ctx.reply('❌ Terjadi kesalahan saat melanjutkan proses.'); } catch (_) {}
+                } finally {
+                    ws.processing = false;
+                }
+            })();
             return;
         }
     }
 
     // Normal message → Puru orchestration
     ws.processing = true;
-    let statusMsg;
-    try {
-        await pushMessage(userId, 'user', userMessage);
-        statusMsg = await ctx.reply('🧠 Puru sedang berpikir... ⏳');
-        const result = await processPuruOrchestration(ctx, userId, statusMsg.message_id);
-        await handleAgentResult(ctx, userId, result, statusMsg.message_id);
-    } finally {
-        ws.processing = false;
-    }
+    
+    // Run orchestration in the background (asynchronous)
+    (async () => {
+        let statusMsg;
+        try {
+            await pushMessage(userId, 'user', userMessage);
+            statusMsg = await ctx.reply('🧠 Puru sedang berpikir... ⏳');
+            const result = await processPuruOrchestration(ctx, userId, statusMsg.message_id);
+            await handleAgentResult(ctx, userId, result, statusMsg.message_id);
+        } catch (err) {
+            console.error('[Orchestration] Background task error:', err);
+            try { await ctx.reply('❌ Terjadi kesalahan saat memproses permintaan.'); } catch (_) {}
+        } finally {
+            ws.processing = false;
+        }
+    })();
 });
 
 // ─── Health-check HTTP server ─────────────────────────────────────────────────
@@ -799,20 +845,39 @@ http.createServer((req, res) => {
 
         await bot.telegram.setMyCommands([
             { command: 'start',   description: 'Mulai bot' },
-            { command: 'ai',      description: 'Gunakan AI' },
-            { command: 'stop',    description: 'Hentikan proses aktif' },
             { command: 'menu',    description: 'Buka menu utama' },
             { command: 'info',    description: 'Status workspace & token' },
-            { command: 'persona', description: 'Set persona AI' },
+            { command: 'stop',    description: 'Hentikan proses aktif (paksa)' },
             { command: 'reset',   description: 'Reset workspace & history' },
             { command: 'help',    description: 'Bantuan' },
         ]);
-        await bot.launch();
+
+        await bot.launch({
+            polling: {
+                allowedUpdates: ['message', 'callback_query'],
+                timeout: 30, // seconds
+            }
+        });
         console.log('✅ Puru Orchestrator v4.0 running (E2B + Firebase)');
     } catch (e) {
         console.error('[FATAL] Failed to launch bot:', e);
+        // Force exit on fatal launch failure to let process manager restart it
+        process.exit(1);
     }
 })();
 
-process.once('SIGINT',  () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+// ─── Graceful Shutdown ────────────────────────────────────────────────────────
+const shutdown = async (signal) => {
+    console.log(`[Shutdown] Received ${signal}. Closing bot...`);
+    try {
+        bot.stop(signal);
+        console.log('👋 Bot stopped gracefully.');
+        process.exit(0);
+    } catch (e) {
+        console.error('[Shutdown Error]', e.message);
+        process.exit(1);
+    }
+};
+
+process.once('SIGINT',  () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
