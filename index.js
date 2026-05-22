@@ -7,9 +7,6 @@ const {
     getWorkspace,
     ensureLoaded,
     pushMessage,
-    getTotalTokens,
-    HISTORY_TOKEN_LIMIT,
-    GLOBAL_TOKEN_LIMIT,
 } = require('./lib/workspace');
 
 const { saveWorkspace, writeFileDirect, cleanupSandboxes } = require('./lib/sandbox');
@@ -57,6 +54,8 @@ const MAX_PURU_LOOPS      = 100;
 const MAX_CODE_LOOPS      = 100;
 const MAX_TOTAL_RETRIES   = 5;
 const RETRY_DELAY_MS      = 3000;
+const HISTORY_TOKEN_LIMIT = 3000;
+const GLOBAL_TOKEN_LIMIT  = 8192;
 
 // ─── Pending Continue state ───────────────────────────────────────────────────
 const pendingLoops = new Map();

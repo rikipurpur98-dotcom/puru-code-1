@@ -3,10 +3,7 @@ const { Markup }       = require('telegraf');
 const {
     getWorkspace,
     ensureLoaded,
-    getTotalTokens,
     clearWorkspace,
-    HISTORY_TOKEN_LIMIT,
-    GLOBAL_TOKEN_LIMIT,
 } = require('../lib/workspace');
 
 const { saveHistory, deleteWorkspace: deleteFirebaseWorkspace } = require('../lib/firebase');
@@ -39,7 +36,6 @@ module.exports = (bot) => {
     const handleInfo = async (ctx) => {
         const userId      = ctx.from.id;
         const ws          = await ensureLoaded(userId);
-        const totalTokens = getTotalTokens(userId);
         const sandboxActive = !!sharedSandboxEntry;
         const personaLine = ws.persona
             ? `\n🎭 *Persona:* \`${ws.persona.slice(0, 80)}${ws.persona.length > 80 ? '…' : ''}\``
@@ -51,9 +47,7 @@ module.exports = (bot) => {
             `👤 *User ID:* \`${userId}\`\n` +
             `📅 *Created:* \`${ws.createdAt}\`\n` +
             `💬 *Total Messages:* ${ws.messageCount}\n` +
-            `📦 *History:* ${ws.history.length} pesan\n` +
-            `🧠 *Puru Tokens:* \`${totalTokens}\` / \`${HISTORY_TOKEN_LIMIT}\` (3k limit)\n` +
-            `🌐 *Global Limit:* \`10000\` token\n` +
+            `📦 *History Entries:* ${ws.history.length}\n` +
             `🔧 *Code Agent:* Stateless (Shared E2B sandbox)\n` +
             `🧪 *E2B Sandbox:* ${sandboxActive ? '✅ Aktif (Shared)' : '⏸️ Tidak aktif'}\n` +
             `☁️ *Storage:* Firebase RTDB (Shared Files, Personal History)` +
