@@ -12,6 +12,17 @@ const {
 const { saveWorkspace, writeFileDirect, cleanupSandboxes } = require('./lib/sandbox');
 const tools = require('./lib/tools');
 
+const AGENT_LABELS = {
+    PURU: {
+        CHAT: '👤 *Puru:*',
+        LOG: '[👤 Puru]'
+    },
+    CODE: {
+        CHAT: '🧑‍💻 *Code:*',
+        LOG: '[🧑‍💻 Code Agent]'
+    }
+};
+
 // ─── Global Error Handlers ────────────────────────────────────────────────────
 process.on('unhandledRejection', (reason) =>
     console.error('[FATAL] Unhandled Rejection:', reason));
@@ -533,7 +544,7 @@ async function callCodeAgent(ctx, userId, subTask) {
         // Show Code Agent thinking (interim)
         if (message) {
             try {
-                const sent = await ctx.reply(`🔧 *Code:* ${message}`, { parse_mode: 'Markdown' });
+                const sent = await ctx.reply(`${AGENT_LABELS.CODE.CHAT} ${message}`, { parse_mode: 'Markdown' });
                 interimMsgIds.push(sent.message_id);
             } catch (_) {}
         }
@@ -668,7 +679,7 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
         if (sendFile) {
             try {
                 const result = await tools.send_file(userId, sendFile, ctx);
-                await pushMessage(userId, 'output', `[Puru send_file]: ${result}`);
+                await pushMessage(userId, 'output', `${AGENT_LABELS.PURU.LOG} send_file: ${result}`);
                 puruConversation +=
                     `\nAssistant: <response><message>${message}</message>` +
                     `<send_file><path>${sendFile.path}</path><caption>${sendFile.caption || ''}</caption></send_file></response>` +
@@ -698,7 +709,7 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
         // Show Puru's planning message (interim)
         if (message) {
             try {
-                const sent = await ctx.reply(`🧠 *Puru:* ${message}`, { parse_mode: 'Markdown' });
+                const sent = await ctx.reply(`${AGENT_LABELS.PURU.CHAT} ${message}`, { parse_mode: 'Markdown' });
                 interimMsgIds.push(sent.message_id);
             } catch (_) {}
         }
@@ -724,7 +735,7 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
         // Push Code result to Puru's history
         const formattedResult = formatCodeAgentResult(codeResult);
         await pushMessage(userId, 'output',
-            `[Code Agent Result]: ${formattedResult.slice(0, 600)}`
+            `${AGENT_LABELS.CODE.LOG} Result: ${formattedResult.slice(0, 600)}`
         );
 
         // Feed result back into Puru's active conversation
