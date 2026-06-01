@@ -11,12 +11,6 @@ module.exports = (bot) => {
             return ctx.reply('🛑 *Tidak ada proses aktif* yang sedang berjalan untuk akun kamu.', { parse_mode: 'Markdown' });
         }
 
-        // Force clear the lock
-        ws.processing = false;
-
-        await ctx.reply(
-            '🛑 *Proses dihentikan paksa!*\n\nLock telah dibuka. Sekarang kamu bisa mengirim perintah baru ke Puru.',
-            { parse_mode: 'Markdown' }
-        );
+        ws.stopRequested = true;
     });
 };

@@ -417,11 +417,19 @@ async function callAIWithRetry(ctx, statusMsgId, payload) {
 // CODE SUB-AGENT RUNNER
 // ═══════════════════════════════════════════════════════════════════════════════
 async function callCodeAgent(ctx, userId, subTask) {
+    const ws = await ensureLoaded(userId);
     let conversation    = `System: ${CODE_SYSTEM_PROMPT}\n\nUser: ${subTask}`;
     let iteration       = 0;
     const interimMsgIds = [];
 
     while (iteration < MAX_CODE_LOOPS) {
+        if (ws.stopRequested) {
+            if (ws.processing) {
+                await ctx.reply('✅ Process stopped successfully');
+                ws.processing = false;
+            }
+            break;
+        }
         await ctx.sendChatAction('typing').catch(() => {});
         const typingHB = setInterval(() =>
             ctx.sendChatAction('typing').catch(() => {}), 4000);
@@ -505,6 +513,7 @@ async function callCodeAgent(ctx, userId, subTask) {
     for (const id of interimMsgIds) {
         try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
     }
+    if (ws.stopRequested) return '[Code Agent]: Process stopped by user.';
     return '[Code Agent]: Mencapai batas iterasi tool.';
 }
 
@@ -522,6 +531,13 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
     const interimMsgIds  = [];
 
     while (puruIteration < MAX_PURU_LOOPS) {
+        if (ws.stopRequested) {
+            if (ws.processing) {
+                await ctx.reply('✅ Process stopped successfully');
+                ws.processing = false;
+            }
+            break;
+        }
         await ctx.sendChatAction('typing').catch(() => {});
         const typingHB = setInterval(() =>
             ctx.sendChatAction('typing').catch(() => {}), 4000);
@@ -636,6 +652,13 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
     // ── Explicitly destroy user sandbox after loop ───────────────────────────
     await require('./lib/sandbox').destroyUserSandbox(userId);
 
+    if (ws.stopRequested) {
+        return {
+            type: 'stopped',
+            interimMsgIds,
+        };
+    }
+
     return {
         type:         'error',
         text:         '⚠️ *Puru gagal menyelesaikan tugas.* Terlalu banyak loop (100 delegasi). Coba pecah permintaan kamu jadi lebih sederhana.',
@@ -700,6 +723,7 @@ bot.on('document', async (ctx) => {
     
     // Run document processing in the background (asynchronous)
     (async () => {
+        ws.stopRequested = false;
         let statusMsg;
         try {
             await ctx.sendChatAction('upload_document');
@@ -789,6 +813,7 @@ bot.on('text', async (ctx, next) => {
             
             // Run orchestration in the background (asynchronous)
             (async () => {
+                ws.stopRequested = false;
                 let statusMsg;
                 try {
                     statusMsg = await ctx.reply('🔄 Melanjutkan orchestration... ⏳');
@@ -812,6 +837,7 @@ bot.on('text', async (ctx, next) => {
     
     // Run orchestration in the background (asynchronous)
     (async () => {
+        ws.stopRequested = false;
         let statusMsg;
         try {
             await pushMessage(userId, 'user', userMessage);
@@ -839,8 +865,10 @@ http.createServer((req, res) => {
 // ─── Launch ───────────────────────────────────────────────────────────────────
 (async () => {
     try {
-        // Kill all ghost sandboxes before starting
-        await cleanupSandboxes();
+        // Kill all ghost sandboxes before starting, unless in development mode
+        if (env !== 'development') {
+            await cleanupSandboxes();
+        }
 
         await bot.telegram.setMyCommands([
             { command: 'start',   description: 'Mulai bot' },
