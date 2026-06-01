@@ -416,11 +416,52 @@ async function callAIWithRetry(ctx, statusMsgId, payload) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CODE SUB-AGENT RUNNER
 // ═══════════════════════════════════════════════════════════════════════════════
+
+function formatCodeAgentResult(result) {
+    if (typeof result === 'string') return result;
+
+    const { status, executionSummary, modifiedFiles, finalMessage, technicalDetails } = result;
+    
+    let formatted = `Code Agent Result [Status: ${status}]\n`;
+    formatted += `Summary: ${executionSummary}\n`;
+    formatted += `Modified Files: ${modifiedFiles.length > 0 ? modifiedFiles.join(', ') : 'None'}\n`;
+    formatted += `Message: ${finalMessage}\n`;
+    if (technicalDetails) {
+        formatted += `Details: ${technicalDetails}\n`;
+    }
+
+    // Smart Truncation: Prioritize Status, Summary, Modified Files.
+    // If too long, truncate Message and Details.
+    const LIMIT = 3000;
+    if (formatted.length > LIMIT) {
+        const header = `Code Agent Result [Status: ${status}]\nSummary: ${executionSummary}\nModified Files: ${modifiedFiles.length > 0 ? modifiedFiles.join(', ') : 'None'}\n`;
+        const remaining = LIMIT - header.length;
+        
+        let body = `Message: ${finalMessage}\n`;
+        if (technicalDetails) body += `Details: ${technicalDetails}\n`;
+        
+        if (body.length > remaining) {
+            body = body.slice(0, remaining - 3) + '...';
+        }
+        formatted = header + body;
+    }
+
+    return formatted;
+}
+
 async function callCodeAgent(ctx, userId, subTask) {
     const ws = await ensureLoaded(userId);
     let conversation    = `System: ${CODE_SYSTEM_PROMPT}\n\nUser: ${subTask}`;
     let iteration       = 0;
     const interimMsgIds = [];
+
+    const tracker = {
+        modifiedFiles: new Set(),
+        toolLogs: [],
+        hasError: false,
+        lastError: null,
+        counts: {}
+    };
 
     while (iteration < MAX_CODE_LOOPS) {
         if (ws.stopRequested) {
@@ -445,7 +486,13 @@ async function callCodeAgent(ctx, userId, subTask) {
             for (const id of interimMsgIds) {
                 try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
             }
-            return `[Code Agent Error]: ${err.message}`;
+            return {
+                status: 'error',
+                finalMessage: `[Code Agent Error]: ${err.message}`,
+                modifiedFiles: Array.from(tracker.modifiedFiles),
+                executionSummary: 'Execution failed due to API error',
+                technicalDetails: err.message
+            };
         } finally {
             clearInterval(typingHB);
         }
@@ -463,7 +510,24 @@ async function callCodeAgent(ctx, userId, subTask) {
             for (const id of interimMsgIds) {
                 try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
             }
-            return finalText || rawText;
+
+            const status = tracker.hasError ? 'partial_success' : 'success';
+            
+            // Build summary
+            const summaryParts = [];
+            if (tracker.counts.read_file) summaryParts.push(`Membaca ${tracker.counts.read_file} file`);
+            const modifiedCount = (tracker.counts.write_file || 0) + (tracker.counts.edit_file || 0);
+            if (modifiedCount) summaryParts.push(`mengubah ${modifiedCount} file`);
+            if (tracker.counts.bash) summaryParts.push(`menjalankan ${tracker.counts.bash} perintah bash`);
+            if (tracker.counts.ls || tracker.counts.grep) summaryParts.push(`mencari ${ (tracker.counts.ls || 0) + (tracker.counts.grep || 0) } kali`);
+            
+            return {
+                status,
+                finalMessage: finalText || rawText,
+                modifiedFiles: Array.from(tracker.modifiedFiles),
+                executionSummary: summaryParts.join(', ') || 'Tidak ada tool yang digunakan',
+                technicalDetails: tracker.lastError
+            };
         }
 
         // Show Code Agent thinking (interim)
@@ -477,6 +541,14 @@ async function callCodeAgent(ctx, userId, subTask) {
         // Execute tool in E2B sandbox
         try {
             const { action, params } = toolCall;
+            
+            // Track tool usage
+            tracker.toolLogs.push(`${action}: ${params.path || params.command || ''}`);
+            tracker.counts[action] = (tracker.counts[action] || 0) + 1;
+            if (action === 'write_file' || action === 'edit_file') {
+                if (params.path) tracker.modifiedFiles.add(params.path);
+            }
+
             const result = await Promise.resolve(tools[action](userId, params, ctx));
 
             // Show tool execution feedback (interim)
@@ -500,6 +572,8 @@ async function callCodeAgent(ctx, userId, subTask) {
 
             iteration++;
         } catch (e) {
+            tracker.hasError = true;
+            tracker.lastError = e.message;
             try {
                 const errMsg = await ctx.replyWithMarkdown(
                     `❌ *Code Tool Error:* \`${toolCall.action || '?'}\`\n\`${e.message}\``
@@ -513,8 +587,24 @@ async function callCodeAgent(ctx, userId, subTask) {
     for (const id of interimMsgIds) {
         try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
     }
-    if (ws.stopRequested) return '[Code Agent]: Process stopped by user.';
-    return '[Code Agent]: Mencapai batas iterasi tool.';
+
+    const status = 'error';
+    const finalMsg = ws.stopRequested ? '[Code Agent]: Process stopped by user.' : '[Code Agent]: Mencapai batas iterasi tool.';
+    
+    const summaryParts = [];
+    if (tracker.counts.read_file) summaryParts.push(`Membaca ${tracker.counts.read_file} file`);
+    const modifiedCount = (tracker.counts.write_file || 0) + (tracker.counts.edit_file || 0);
+    if (modifiedCount) summaryParts.push(`mengubah ${modifiedCount} file`);
+    if (tracker.counts.bash) summaryParts.push(`menjalankan ${tracker.counts.bash} perintah bash`);
+    if (tracker.counts.ls || tracker.counts.grep) summaryParts.push(`mencari ${ (tracker.counts.ls || 0) + (tracker.counts.grep || 0) } kali`);
+
+    return {
+        status,
+        finalMessage: finalMsg,
+        modifiedFiles: Array.from(tracker.modifiedFiles),
+        executionSummary: summaryParts.join(', ') || 'Tidak ada tool yang digunakan',
+        technicalDetails: tracker.lastError
+    };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -632,14 +722,15 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
         );
 
         // Push Code result to Puru's history
+        const formattedResult = formatCodeAgentResult(codeResult);
         await pushMessage(userId, 'output',
-            `[Code Agent Result]: ${String(codeResult).slice(0, 600)}`
+            `[Code Agent Result]: ${formattedResult.slice(0, 600)}`
         );
 
         // Feed result back into Puru's active conversation
-        const truncatedCodeResult = String(codeResult).length > 2000 
-            ? String(codeResult).slice(0, 2000) + '... (truncated for context)' 
-            : String(codeResult);
+        const truncatedCodeResult = formattedResult.length > 2000
+            ? formattedResult.slice(0, 2000) + '... (truncated for context)'
+            : formattedResult;
 
         puruConversation +=
             `\nAssistant: <response><message>${message}</message>` +
