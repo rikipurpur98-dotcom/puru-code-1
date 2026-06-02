@@ -12,7 +12,7 @@ const {
     pushMessage,
 } = require('./lib/workspace');
 
-const { saveWorkspace, writeFileDirect, cleanupSandboxes } = require('./lib/sandbox');
+const { saveWorkspace, writeFileDirect, cleanupSandboxes, getSandbox, resolveInSandbox, destroyUserSandbox } = require('./lib/sandbox');
 const tools = require('./lib/tools');
 const {
     PURU_BASE_SYSTEM_PROMPT,
@@ -380,6 +380,16 @@ function formatCodeAgentResult(result) {
 
 async function callCodeAgent(ctx, userId, subTask) {
     const ws = await ensureLoaded(userId);
+    
+    // Check if PLAN.md exists to provide a suggestion to the Code Agent
+    try {
+        const sandbox = await getSandbox(userId);
+        await sandbox.files.read(resolveInSandbox(userId, 'PLAN.md'));
+        subTask += "\n\n(Suggestion: Please read PLAN.md to understand the current plan and progress before proceeding.)";
+    } catch (e) {
+        // PLAN.md not found or sandbox error, proceed without suggestion
+    }
+
     let conversation    = `System: ${CODE_SYSTEM_PROMPT}\n\nUser: ${subTask}`;
     let iteration       = 0;
     const interimMsgIds = [];
@@ -798,6 +808,16 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
             ? await callArchitectAgent(ctx, userId, delegate.task)
             : await callCodeAgent(ctx, userId, delegate.task);
 
+        if (delegate.agent === 'Code') {
+            try {
+                const sandbox = await getSandbox(userId);
+                await sandbox.files.remove(resolveInSandbox(userId, 'PLAN.md'));
+                console.log(`[Orchestration] PLAN.md removed immediately after Code Agent finished for ${userId}`);
+            } catch (e) {
+                console.error('[Orchestration] Failed to remove PLAN.md after Code Agent:', e.message);
+            }
+        }
+
         // ── After each agent loop, persist workspace → Firebase ──────────
         await saveWorkspace(userId).catch(e =>
             console.error('[Orchestration] saveWorkspace error:', e.message)
@@ -824,8 +844,12 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
         puruIteration++;
     }
 
-    // ── Explicitly destroy user sandbox after loop ───────────────────────────
-    await require('./lib/sandbox').destroyUserSandbox(userId);
+    // ── Destroy user sandbox after loop ───────────────────────────
+    await saveWorkspace(userId).catch(e =>
+        console.error('[Orchestration] Final saveWorkspace error:', e.message)
+    );
+
+    await destroyUserSandbox(userId);
 
     if (ws.stopRequested) {
         return {
