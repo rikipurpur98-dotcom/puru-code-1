@@ -1,4 +1,7 @@
 'use strict';
+
+global.AI_MOCK_RESPONSE = null;
+
 const { Telegraf, Markup } = require('telegraf');
 const axios                = require('axios');
 const { XMLParser }        = require('fast-xml-parser');
@@ -11,6 +14,13 @@ const {
 
 const { saveWorkspace, writeFileDirect, cleanupSandboxes } = require('./lib/sandbox');
 const tools = require('./lib/tools');
+const {
+    PURU_BASE_SYSTEM_PROMPT,
+    CODE_SYSTEM_PROMPT,
+    ARCHITECT_SYSTEM_PROMPT,
+    HISTORY_TOKEN_LIMIT,
+    GLOBAL_TOKEN_LIMIT
+} = require('./lib/prompts');
 
 const AGENT_LABELS = {
     PURU: {
@@ -20,6 +30,10 @@ const AGENT_LABELS = {
     CODE: {
         CHAT: '🧑‍💻 *Code:*',
         LOG: '[🧑‍💻 Code Agent]'
+    },
+    ARCHITECT: {
+        CHAT: '🏗️ *Architect:*',
+        LOG: '[🏗️ Architect]'
     }
 };
 
@@ -65,8 +79,6 @@ const MAX_PURU_LOOPS      = 100;
 const MAX_CODE_LOOPS      = 100;
 const MAX_TOTAL_RETRIES   = 5;
 const RETRY_DELAY_MS      = 3000;
-const HISTORY_TOKEN_LIMIT = 3000;
-const GLOBAL_TOKEN_LIMIT  = 8192;
 
 // ─── Pending Continue state ───────────────────────────────────────────────────
 const pendingLoops = new Map();
@@ -76,7 +88,7 @@ const xmlParser = new XMLParser({
     cdataPropName:    '__cdata',
     parseTagValue:    false,
     trimValues:       false,
-    ignoreAttributes: true,
+    ignoreAttributes: false,
     processEntities:  false, // Don't decode HTML entities automatically
 });
 
@@ -100,10 +112,14 @@ function parsePuruResponse(text) {
 
         let delegate = null;
         if (resp.delegate) {
-            const task = typeof resp.delegate === 'object'
-                ? xmlVal(resp.delegate.task).trim()
-                : String(resp.delegate).trim();
-            if (task) delegate = { task };
+            const delegateObj = typeof resp.delegate === 'object' ? resp.delegate : { '#text': resp.delegate };
+            const task = xmlVal(delegateObj.task).trim();
+            if (task) {
+                delegate = {
+                    task,
+                    agent: delegateObj['@_agent'] || 'Code'
+                };
+            }
         }
 
         let sendFile = null;
@@ -199,105 +215,6 @@ function parseCodeResponse(text) {
     return { message, toolCall };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SYSTEM PROMPTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const PURU_BASE_SYSTEM_PROMPT = `You are Puru, an AI Orchestrator and the SINGLE POINT OF CONTACT for the user.
-You coordinate tasks by delegating to a specialist Code Sub-Agent named "Code".
-
-PERSONA & STYLE:
-- Be friendly, smart, relaxed but competent. 🌟
-- Use "aku" for yourself and "kamu" for the user.
-- Keep responses CONCISE, short, and easy to read. Avoid long-winded explanations.
-- Use emojis naturally to make the conversation lively and friendly. 😊
-- Mirror the user's language style (mixed Indonesian-English/Jaksel is fine).
-
-YOUR ROLE:
-- Receive user requests and break them into small, sequential sub-tasks.
-- Delegate ONE sub-task at a time to Code Agent.
-- Provide clear, brief status updates while working.
-- Package results into a friendly, SHORT, and beautiful final answer using "aku" and "kamu". 🚀
-
-RESPONSE FORMAT (XML):
-
-When delegating a sub-task to Code Agent:
-<response>
-  <message>Brief status or thinking for user (optional)</message>
-  <delegate>
-    <task>Complete, self-contained instruction for Code Agent. Be specific. Include file paths, what to read/check first, what to change.</task>
-  </delegate>
-</response>
-
-When giving final answer (no more delegation needed):
-<response>
-  <message>Final answer to user. Clear and friendly.</message>
-</response>
-
-When you need to send a file to the user:
-<response>
-  <message>Sending the file...</message>
-  <send_file>
-    <path>path/to/file</path>
-    <caption>optional caption</caption>
-  </send_file>
-</response>
-
-RULES:
-- NEVER delegate multiple tasks at once. ONE sub-task per response.
-- Code Agent is STATELESS — every instruction must be self-sufficient.
-- If Code Agent result is incomplete, delegate the next sub-task.
-- History is auto-compacted at ${HISTORY_TOKEN_LIMIT} tokens (Puru).
-- Global system token budget: ${GLOBAL_TOKEN_LIMIT} tokens.
-- STRICT ADHERENCE: Only perform changes explicitly requested by the user. Do NOT modify files or code that is not relevant to the current task.
-- ALWAYS check the "[SYSTEM REMINDER]" at the end of the prompt for your current goal.
-- Avoid nested asterisks or complex Markdown in <message>. Use '-' for lists.`;
-
-const CODE_SYSTEM_PROMPT = `You are Code, a specialist Code Sub-Agent under the Puru Orchestrator system.
-
-IDENTITY:
-- You are STATELESS — you have NO memory of previous conversations.
-- You receive ONE specific sub-task per session from Puru (Orchestrator).
-- You execute it inside a real E2B cloud sandbox.
-
-SANDBOX ENVIRONMENT:
-- OS: Linux (Ubuntu)
-- Your workspace root: /home/user  (semua file project berada di sini — ini adalah root path sandbox)
-- Full shell access via bash tool — internet-enabled, any package installable via apt/pip/npm
-- All tools run inside this isolated sandbox. Changes persist for your session.
-
-MANDATORY PROCEDURE — BEFORE EDITING ANY FILE:
-1. ALWAYS use read_file (or ls) to read and display the file content FIRST.
-2. Only after reading and confirming the content, proceed with edits.
-3. Never assume file content — always verify first.
-
-RESPONSE FORMAT (XML):
-<response>
-<message>Your status or explanation</message>
-<tool>
-    <action_name>
-        <param_name>value</param_name>
-    </action_name>
-</tool>
-</response>
-
-CRITICAL:
-- ONE tool, ONE action per response. Never call multiple tools at once.
-- If no tool needed, omit the <tool> block.
-- MANDATORY: Use <![CDATA[ ]]> for ANY content that contains special characters, HTML, or code (especially in write_file and edit_file).
-
-AVAILABLE TOOLS:
-1. ls         — List files.    <ls><path>.</path></ls>
-2. read_file  — Read lines.    <read_file><path>f</path><start_line>1</start_line><end_line>50</end_line></read_file>
-3. write_file — Write file.    <write_file><path>f</path><content><![CDATA[text]]></content></write_file>
-4. edit_file  — Replace text.  <edit_file><path>f</path><old_string><![CDATA[a]]></old_string><new_string><![CDATA[b]]></new_string></edit_file>
-5. grep       — Search.        <grep><path>f</path><pattern>keyword</pattern></grep>
-6. bash       — Shell (max 2m).<bash><command><![CDATA[cmd]]></command></bash>
-
-RULES:
-- File paths can be relative (resolved to /home/user) or absolute. The project root is /home/user.
-- Match user language (English / Indonesian / Mixed).
-- Be precise and complete the sub-task fully.`;
 
 // ─── Build Puru conversation ──────────────────────────────────────────────────
 async function buildConversation(userId) {
@@ -373,6 +290,7 @@ function extractAIText(data) {
 
 // ─── API call with alternating retry ─────────────────────────────────────────
 async function callAIWithRetry(ctx, statusMsgId, payload) {
+    if (global.AI_MOCK_RESPONSE) return global.AI_MOCK_RESPONSE();
     let lastError;
     
     for (let attempt = 1; attempt <= MAX_TOTAL_RETRIES; attempt++) {
@@ -540,6 +458,7 @@ async function callCodeAgent(ctx, userId, subTask) {
                 technicalDetails: tracker.lastError
             };
         }
+        
 
         // Show Code Agent thinking (interim)
         if (message) {
@@ -614,6 +533,155 @@ async function callCodeAgent(ctx, userId, subTask) {
         finalMessage: finalMsg,
         modifiedFiles: Array.from(tracker.modifiedFiles),
         executionSummary: summaryParts.join(', ') || 'Tidak ada tool yang digunakan',
+        technicalDetails: tracker.lastError
+    };
+}
+
+async function callArchitectAgent(ctx, userId, subTask) {
+    const ws = await ensureLoaded(userId);
+    let conversation    = `System: ${ARCHITECT_SYSTEM_PROMPT}\n\nUser: ${subTask}`;
+    let iteration       = 0;
+    const interimMsgIds = [];
+
+    const tracker = {
+        modifiedFiles: new Set(),
+        toolLogs: [],
+        hasError: false,
+        lastError: null,
+        counts: {}
+    };
+
+    while (iteration < MAX_CODE_LOOPS) {
+        if (ws.stopRequested) {
+            if (ws.processing) {
+                await ctx.reply('✅ Process stopped successfully');
+                ws.processing = false;
+            }
+            break;
+        }
+        await ctx.sendChatAction('typing').catch(() => {});
+        const typingHB = setInterval(() =>
+            ctx.sendChatAction('typing').catch(() => {}), 4000);
+
+        let rawText = '';
+        try {
+            const response = await callAIWithRetry(ctx, null,
+                { prompt: conversation + '\nAssistant:' }
+            );
+            rawText = extractAIText(response.data);
+        } catch (err) {
+            clearInterval(typingHB);
+            for (const id of interimMsgIds) {
+                try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
+            }
+            return {
+                status: 'error',
+                finalMessage: `[Architect Agent Error]: ${err.message}`,
+                modifiedFiles: Array.from(tracker.modifiedFiles),
+                executionSummary: 'Execution failed due to API error',
+                technicalDetails: err.message
+            };
+        } finally {
+            clearInterval(typingHB);
+        }
+
+        const { message, toolCall } = parseCodeResponse(rawText);
+
+        if (!toolCall) {
+            const finalText = message || rawText
+                .replace(/<response\s*>/gi,  '')
+                .replace(/<\/response\s*>/gi, '')
+                .replace(/<message\s*>([\s\S]*?)<\/message\s*>/gi, '$1')
+                .trim();
+
+            for (const id of interimMsgIds) {
+                try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
+            }
+
+            const status = tracker.hasError ? 'partial_success' : 'success';
+            
+            const summaryParts = [];
+            if (tracker.counts.read_file) summaryParts.push(`Membaca ${tracker.counts.read_file} file`);
+            if (tracker.counts.write_file) summaryParts.push(`menulis ${tracker.counts.write_file} kali ke PLAN.md`);
+            if (tracker.counts.ls || tracker.counts.grep) summaryParts.push(`mencari ${ (tracker.counts.ls || 0) + (tracker.counts.grep || 0) } kali`);
+            
+            return {
+                status,
+                finalMessage: finalText || rawText,
+                modifiedFiles: Array.from(tracker.modifiedFiles),
+                executionSummary: summaryParts.join(', ') || 'Tidak ada tool yang digunakan',
+                technicalDetails: tracker.lastError
+            };
+        }
+
+        if (message) {
+            try {
+                const sent = await ctx.reply(`${AGENT_LABELS.ARCHITECT.CHAT} ${message}`, { parse_mode: 'Markdown' });
+                interimMsgIds.push(sent.message_id);
+            } catch (_) {}
+        }
+
+        try {
+            const { action, params } = toolCall;
+            
+            const allowedTools = ['ls', 'read_file', 'grep', 'write_file'];
+            if (!allowedTools.includes(action)) {
+                throw new Error(`Architect is not allowed to use tool: ${action}`);
+            }
+
+            if (action === 'write_file' && params.path !== 'PLAN.md') {
+                throw new Error(`Architect can only write to PLAN.md. Attempted to write to: ${params.path}`);
+            }
+
+            tracker.toolLogs.push(`${action}: ${params.path || params.command || ''}`);
+            tracker.counts[action] = (tracker.counts[action] || 0) + 1;
+            if (action === 'write_file') {
+                if (params.path) tracker.modifiedFiles.add(params.path);
+            }
+
+            const result = await Promise.resolve(tools[action](userId, params, ctx));
+
+            try {
+                const label   = `🛠️ ${action}`;
+                const preview = String(result).slice(0, 2000);
+                const toolMsg = await ctx.replyWithMarkdown(
+                    `${label} \`→\` \`${preview}\``
+                );
+                interimMsgIds.push(toolMsg.message_id);
+            } catch (_) {}
+
+            const paramsXml = Object.entries(params)
+                .map(([k, v]) => `<${k}><![CDATA[${v}]]></${k}>`)
+                .join('');
+
+            conversation +=
+                `\nAssistant: <response><message>${message}</message>` +
+                `<tool><${action}>${paramsXml}</${action}></tool></response>` +
+                `\nTool Result (${action}): ${result}`;
+
+            iteration++;
+        } catch (e) {
+            tracker.hasError = true;
+            tracker.lastError = e.message;
+            try {
+                const errMsg = await ctx.replyWithMarkdown(
+                    `❌ *Architect Tool Error:* \`${toolCall.action || '?'}\`\n\`${e.message}\``
+                );
+                interimMsgIds.push(errMsg.message_id);
+            } catch (_) {}
+            conversation += `\nAssistant: ${rawText}\nTool Error: ${e.message}`;
+        }
+    }
+
+    for (const id of interimMsgIds) {
+        try { await ctx.telegram.deleteMessage(ctx.chat.id, id); } catch (_) {}
+    }
+
+    return {
+        status: 'error',
+        finalMessage: '[Architect Agent]: Mencapai batas iterasi tool.',
+        modifiedFiles: Array.from(tracker.modifiedFiles),
+        executionSummary: 'Reached iteration limit',
         technicalDetails: tracker.lastError
     };
 }
@@ -716,37 +784,42 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
 
         // Show delegation status (interim)
         try {
+            const agentName = delegate.agent === 'Architect' ? 'Architect Agent' : 'Code Agent';
             const taskPreview = delegate.task.slice(0, 180);
             const delegateMsg = await ctx.reply(
-                `⚙️ *Mendelegasikan ke Code Agent...*\n_${taskPreview}${delegate.task.length > 180 ? '…' : ''}_`,
+                `⚙️ *Mendelegasikan ke ${agentName}...*\n_${taskPreview}${delegate.task.length > 180 ? '…' : ''}_`,
                 { parse_mode: 'Markdown' }
             );
             interimMsgIds.push(delegateMsg.message_id);
         } catch (_) {}
 
-        // Call Code Agent (stateless — E2B sandbox for specific user)
-        const codeResult = await callCodeAgent(ctx, userId, delegate.task);
+        // Call appropriate agent
+        const agentResult = delegate.agent === 'Architect'
+            ? await callArchitectAgent(ctx, userId, delegate.task)
+            : await callCodeAgent(ctx, userId, delegate.task);
 
-        // ── After each Code Agent loop, persist workspace → Firebase ──────────
+        // ── After each agent loop, persist workspace → Firebase ──────────
         await saveWorkspace(userId).catch(e =>
             console.error('[Orchestration] saveWorkspace error:', e.message)
         );
 
-        // Push Code result to Puru's history
-        const formattedResult = formatCodeAgentResult(codeResult);
+        // Push result to Puru's history
+        const agentLabel = delegate.agent === 'Architect' ? AGENT_LABELS.ARCHITECT.LOG : AGENT_LABELS.CODE.LOG;
+        const formattedResult = formatCodeAgentResult(agentResult);
         await pushMessage(userId, 'output',
-            `${AGENT_LABELS.CODE.LOG} Result: ${formattedResult.slice(0, 600)}`
+            `${agentLabel} Result: ${formattedResult.slice(0, 600)}`
         );
 
         // Feed result back into Puru's active conversation
-        const truncatedCodeResult = formattedResult.length > 2000
+        const truncatedResult = formattedResult.length > 2000
             ? formattedResult.slice(0, 2000) + '... (truncated for context)'
             : formattedResult;
 
+        const agentTag = delegate.agent === 'Architect' ? 'Architect' : 'Code';
         puruConversation +=
             `\nAssistant: <response><message>${message}</message>` +
-            `<delegate><task>${delegate.task}</task></delegate></response>` +
-            `\nCode Agent Result: ${truncatedCodeResult}`;
+            `<delegate agent="${agentTag}"><task>${delegate.task}</task></delegate></response>` +
+            `\n${agentTag} Agent Result: ${truncatedResult}`;
 
         puruIteration++;
     }
@@ -1010,3 +1083,10 @@ const shutdown = async (signal) => {
 
 process.once('SIGINT',  () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+module.exports = {
+    processPuruOrchestration,
+    parsePuruResponse,
+    parseCodeResponse,
+    callAIWithRetry
+};
