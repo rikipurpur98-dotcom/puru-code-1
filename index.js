@@ -15,9 +15,9 @@ const {
 const { saveWorkspace, writeFileDirect, cleanupSandboxes, getSandbox, resolveInSandbox, destroyUserSandbox } = require('./lib/sandbox');
 const tools = require('./lib/tools');
 const {
-    PURU_BASE_SYSTEM_PROMPT,
-    CODE_SYSTEM_PROMPT,
-    ARCHITECT_SYSTEM_PROMPT,
+    ORCHESTRATOR_CONFIG,
+    CODE_AGENT_CONFIG,
+    ARCHITECT_CONFIG,
     HISTORY_TOKEN_LIMIT,
     GLOBAL_TOKEN_LIMIT
 } = require('./lib/prompts');
@@ -219,7 +219,7 @@ function parseCodeResponse(text) {
 // ─── Build Puru conversation ──────────────────────────────────────────────────
 async function buildConversation(userId) {
     const ws           = await ensureLoaded(userId);
-    let   systemPrompt = PURU_BASE_SYSTEM_PROMPT;
+    let   systemPrompt = `${ORCHESTRATOR_CONFIG.persona}\n\n${ORCHESTRATOR_CONFIG.tools}`;
 
     // ─── Inject Workspace Structure ──────────────────────────────────────────
     try {
@@ -390,7 +390,7 @@ async function callCodeAgent(ctx, userId, subTask) {
         // PLAN.md not found or sandbox error, proceed without suggestion
     }
 
-    let conversation    = `System: ${CODE_SYSTEM_PROMPT}\n\nUser: ${subTask}`;
+    let conversation    = `System: ${CODE_AGENT_CONFIG.persona}\n\n${CODE_AGENT_CONFIG.tools}\n\nUser: ${subTask}`;
     let iteration       = 0;
     const interimMsgIds = [];
 
@@ -549,7 +549,7 @@ async function callCodeAgent(ctx, userId, subTask) {
 
 async function callArchitectAgent(ctx, userId, subTask) {
     const ws = await ensureLoaded(userId);
-    let conversation    = `System: ${ARCHITECT_SYSTEM_PROMPT}\n\nUser: ${subTask}`;
+    let conversation    = `System: ${ARCHITECT_CONFIG.persona}\n\n${ARCHITECT_CONFIG.tools}\n\nUser: ${subTask}`;
     let iteration       = 0;
     const interimMsgIds = [];
 
