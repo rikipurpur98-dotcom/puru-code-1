@@ -130,7 +130,16 @@ function parsePuruResponse(text) {
             };
         }
 
-        return { message, delegate, sendFile };
+        let lsCall = null;
+        if (resp.ls) {
+            if (typeof resp.ls === 'object') {
+                lsCall = { path: xmlVal(resp.ls.path) || '.' };
+            } else {
+                lsCall = { path: xmlVal(resp.ls) || '.' };
+            }
+        }
+
+        return { message, delegate, sendFile, lsCall };
     } catch (e) {
         console.error('[Puru XML Parse Error]', e.message);
         const stripped = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -751,7 +760,7 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
             clearInterval(typingHB);
         }
 
-        const { message, delegate, sendFile } = parsePuruResponse(rawText);
+        const { message, delegate, sendFile, lsCall } = parsePuruResponse(rawText);
 
         // Tool: send_file (directly from Puru)
         if (sendFile) {
@@ -774,6 +783,23 @@ async function processPuruOrchestration(ctx, userId, statusMsgId, loopState = nu
                     text: `❌ *Error saat mengirim file:* \`${e.message}\`\n\nPuru berhenti untuk mencegah error berulang.`,
                     interimMsgIds,
                 };
+            }
+        }
+
+        // Tool: ls (directly from Puru)
+        if (lsCall) {
+            try {
+                const result = await tools.ls(userId, lsCall);
+                await pushMessage(userId, 'output', `${AGENT_LABELS.PURU.LOG} ls: ${result}`);
+                puruConversation +=
+                    `\nAssistant: <response><message>${message}</message>` +
+                    `<ls><path>${lsCall.path}</path></ls></response>` +
+                    `\nTool Result (ls): ${result}`;
+                puruIteration++;
+                continue;
+            } catch (e) {
+                console.error('[Puru ls Error]', e.message);
+                puruConversation += `\nAssistant: <response><message>${message}</message></response>\nTool Error (ls): ${e.message}`;
             }
         }
 
