@@ -106,7 +106,9 @@ function parsePuruResponse(text) {
     if (!responseMatch) return { message: text.trim(), delegate: null, sendFile: null };
 
     try {
-        const parsed  = xmlParser.parse(responseMatch[0]);
+        const rawXml = responseMatch[0];
+        const sanitizedXml = rawXml.replace(/&(?!(amp|lt|gt|quot|apos);)/g, '&amp;');
+        const parsed  = xmlParser.parse(sanitizedXml);
         const resp    = parsed?.response || {};
         const message = xmlVal(resp.message).trim();
 
@@ -157,7 +159,8 @@ function parseCodeResponse(text) {
     let toolCall = null;
 
     try {
-        const parsed = xmlParser.parse(rawXml);
+        const sanitizedXml = rawXml.replace(/&(?!(amp|lt|gt|quot|apos);)/g, '&amp;');
+        const parsed = xmlParser.parse(sanitizedXml);
         const resp = parsed?.response || {};
         message = xmlVal(resp.message).trim();
 
@@ -1080,11 +1083,12 @@ bot.on('text', async (ctx, next) => {
 
 // ─── Health-check HTTP server ─────────────────────────────────────────────────
 const http = require('http');
+const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('✅ Puru Orchestrator v4.0 — Bot is running\n');
-}).listen(3000, () => {
-    console.log('🌐 Health-check server listening on port 3000');
+}).listen(PORT, () => {
+    console.log(`🌐 Health-check server listening on port ${PORT}`);
 });
 
 // ─── Launch ───────────────────────────────────────────────────────────────────

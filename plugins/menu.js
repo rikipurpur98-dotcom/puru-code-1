@@ -7,7 +7,7 @@ const {
 } = require('../lib/workspace');
 
 const { saveHistory, deleteWorkspace: deleteFirebaseWorkspace } = require('../lib/firebase');
-const { resetUser, sharedSandboxEntry }                          = require('../lib/sandbox');
+const { resetUser, isSandboxActive }                          = require('../lib/sandbox');
 
 module.exports = (bot) => {
 
@@ -36,7 +36,7 @@ module.exports = (bot) => {
     const handleInfo = async (ctx) => {
         const userId      = ctx.from.id;
         const ws          = await ensureLoaded(userId);
-        const sandboxActive = !!sharedSandboxEntry;
+        const sandboxActive = isSandboxActive(userId);
         const personaLine = ws.persona
             ? `\n🎭 *Persona:* \`${ws.persona.slice(0, 80)}${ws.persona.length > 80 ? '…' : ''}\``
             : '';

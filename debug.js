@@ -96,6 +96,15 @@ const mockModules = {
         cleanupSandboxes: async () => {},
         destroyUserSandbox: async () => {},
         getCachedStructure: () => 'PLAN.md\nbtc_price.py',
+        resolveInSandbox: (userId, path) => path,
+        isSandboxActive: (userId) => true,
+        getSandbox: async (userId) => ({
+            files: {
+                read: async () => 'PLAN.md content',
+                write: async () => {},
+                remove: async () => {}
+            }
+        })
     },
     './lib/tools': mockTools,
 };

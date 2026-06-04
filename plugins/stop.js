@@ -12,5 +12,6 @@ module.exports = (bot) => {
         }
 
         ws.stopRequested = true;
+        await ctx.reply('🛑 *Permintaan penghentian dikirim.* Menunggu siklus saat ini selesai untuk berhenti aman...', { parse_mode: 'Markdown' });
     });
 };
