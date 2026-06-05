@@ -51,48 +51,48 @@ export default function ConfigPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden md:max-w-2xl p-6">
+    <div className="min-h-screen bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md mx-auto bg-slate-900 rounded-xl shadow-2xl overflow-hidden md:max-w-2xl p-6 border border-slate-800">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Bot Configuration</h1>
-          <p className="text-gray-500">Atur konfigurasi bot Telegram Anda di sini</p>
+          <h1 className="text-2xl font-bold text-slate-50">Bot Configuration</h1>
+          <p className="text-slate-400">Atur konfigurasi bot Telegram Anda di sini</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Bot ID</label>
+            <label className="block text-sm font-medium text-slate-300">Bot ID</label>
             <input
               type="text"
               name="botId"
               value={formData.botId}
               onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-sm text-slate-200 shadow-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
               placeholder="Contoh: my-awesome-bot"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Telegram Token</label>
+            <label className="block text-sm font-medium text-slate-300">Telegram Token</label>
             <input
               type="password"
               name="token"
               value={formData.token}
               onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-sm text-slate-200 shadow-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
               placeholder="123456789:ABCdefGhI..."
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Gemini Base URL</label>
+            <label className="block text-sm font-medium text-slate-300">Gemini Base URL</label>
             <input
               type="url"
               name="baseUrl"
               value={formData.baseUrl}
               onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-sm text-slate-200 shadow-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
               placeholder="https://your-api-domain.com"
               required
             />
@@ -100,39 +100,39 @@ export default function ConfigPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Trigger Type</label>
+              <label className="block text-sm font-medium text-slate-300">Trigger Type</label>
               <select
                 name="trigger"
                 value={formData.trigger}
                 onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-sm text-slate-200 shadow-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
               >
                 <option value="all">All Messages</option>
                 <option value="command">Command</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Command</label>
+              <label className="block text-sm font-medium text-slate-300">Command</label>
               <input
                 type="text"
                 name="command"
                 value={formData.command}
                 onChange={handleChange}
                 disabled={formData.trigger === "all"}
-                className={`mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 ${formData.trigger === "all" ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                className={`mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-sm text-slate-200 shadow-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all ${formData.trigger === "all" ? "bg-slate-800 cursor-not-allowed" : ""}`}
                 placeholder="/start"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">System Prompt</label>
+            <label className="block text-sm font-medium text-slate-300">System Prompt</label>
             <textarea
               name="systemPrompt"
               rows={4}
               value={formData.systemPrompt}
               onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="mt-1 block w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-sm text-slate-200 shadow-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
               placeholder="Anda adalah asisten yang membantu..."
               required
             />
@@ -141,14 +141,14 @@ export default function ConfigPage() {
           <button
             type="submit"
             disabled={loading}
-            className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${loading ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors`}
+            className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${loading ? "bg-indigo-400" : "bg-indigo-600 hover:bg-indigo-700"} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors`}
           >
             {loading ? "Saving..." : "Save Configuration"}
           </button>
         </form>
 
         {status && (
-          <div className={`mt-4 p-3 rounded-md text-sm text-center ${status.type === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+          <div className={`mt-4 p-3 rounded-md text-sm text-center ${status.type === "success" ? "bg-green-900/30 text-green-400" : "bg-red-900/30 text-red-400"}`}>
             {status.message}
           </div>
         )}
