@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Manage Chat History
-    const history = await getHistory(botId, chatId.toString());
+    const history = (await getHistory(botId, chatId.toString())) as ChatMessage[];
     
     // Construct prompt with history
     let prompt = `System Prompt: ${config.systemPrompt}\n\n`;
